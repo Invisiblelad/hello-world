@@ -13,7 +13,7 @@ spec:
     spec:
       containers:
       - name: hello
-        image: hello-world:latest
+        image: hello-world
         resources:
           limits:
             memory: "128Mi"

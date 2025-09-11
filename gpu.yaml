@@ -1,0 +1,61 @@
+#!/bin/bash
+# k8s-gpu-troubleshoot-light.sh
+# Lightweight GPU troubleshooting for K8s clusters (no SSH required)
+
+echo "===================="
+echo "K8s GPU Troubleshoot Report (Lightweight)"
+echo "Date: $(date)"
+echo "===================="
+
+# 1. Check all nodes for GPU resources
+kubectl get nodes -o wide | while read line; do
+    NODE=$(echo $line | awk '{print $1}')
+    if [[ "$NODE" == "NAME" ]]; then continue; fi
+
+    echo ""
+    echo "===================="
+    echo "Node: $NODE"
+    echo "===================="
+
+    # GPU capacity and allocatable
+    GPU_CAPACITY=$(kubectl get node $NODE -o jsonpath='{.status.capacity.nvidia\.com/gpu}' 2>/dev/null)
+    GPU_ALLOCATABLE=$(kubectl get node $NODE -o jsonpath='{.status.allocatable.nvidia\.com/gpu}' 2>/dev/null)
+    echo "K8s GPU Capacity: ${GPU_CAPACITY:-0}"
+    echo "K8s GPU Allocatable: ${GPU_ALLOCATABLE:-0}"
+
+    if [[ -z "$GPU_CAPACITY" || "$GPU_CAPACITY" == "0" ]]; then
+        echo "[!] GPUs not detected by Kubernetes on node $NODE"
+        echo "    Suggestion: Ensure NVIDIA device plugin is running and node has GPUs."
+    fi
+
+    # 2. Device plugin pods on this node
+    DP_POD=$(kubectl get pods -n kube-system -o wide | grep nvidia-device-plugin | grep $NODE | awk '{print $1}')
+    if [[ -z "$DP_POD" ]]; then
+        echo "[!] NVIDIA device plugin not running on this node"
+        echo "    Suggestion: kubectl apply -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.13.0/nvidia-device-plugin.yml"
+    else
+        echo "Device plugin pod running: $DP_POD"
+    fi
+
+    # 3. Pending GPU pods scheduled on this node
+    echo "Pending GPU pods on this node:"
+    kubectl get pods --all-namespaces -o wide | grep Pending | grep $NODE | while read podline; do
+        echo "$podline"
+        echo "    Suggestion: Check pod spec for 'resources.limits.nvidia.com/gpu' and nodeSelector/taints"
+    done
+
+    # 4. Check GPU type label suggestion
+    GPU_LABEL=$(kubectl get node $NODE -o jsonpath='{.metadata.labels.gpu-type}' 2>/dev/null)
+    if [[ -z "$GPU_LABEL" && "$GPU_CAPACITY" != "0" ]]; then
+        echo "    Suggestion: Label node with GPU type for scheduling, e.g.:"
+        echo "      kubectl label node $NODE gpu-type=<GPU_TYPE> --overwrite"
+    else
+        echo "Node GPU label: $GPU_LABEL"
+    fi
+
+done
+
+echo ""
+echo "===================="
+echo "End of Lightweight GPU Report"
+echo "===================="

@@ -1,0 +1,44 @@
+#!/bin/bash
+# k8s-gpu-summary.sh
+# GPU Health Summary for Kubernetes Cluster
+
+echo "=============================="
+echo "K8s GPU Health Summary"
+echo "Date: $(date)"
+echo "=============================="
+printf "%-25s %-10s %-12s %-20s %-15s\n" "NODE" "GPU_CAP" "GPU_ALLOC" "DEVICE_PLUGIN" "PENDING_PODS"
+echo "---------------------------------------------------------------------------------------"
+
+NODES=$(kubectl get nodes -o jsonpath='{.items[*].metadata.name}')
+
+for NODE in $NODES; do
+    # Skip header if present
+    if [[ "$NODE" == "NAME" ]]; then continue; fi
+
+    # GPU Capacity & Allocatable
+    GPU_CAP=$(kubectl get node $NODE -o jsonpath='{.status.capacity.nvidia\.com/gpu}' 2>/dev/null)
+    GPU_ALLOC=$(kubectl get node $NODE -o jsonpath='{.status.allocatable.nvidia\.com/gpu}' 2>/dev/null)
+    GPU_CAP=${GPU_CAP:-0}
+    GPU_ALLOC=${GPU_ALLOC:-0}
+
+    # Device Plugin status
+    DP_POD=$(kubectl get pods -n kube-system -o wide | grep nvidia-device-plugin | grep $NODE | awk '{print $1}')
+    if [[ -z "$DP_POD" ]]; then
+        DP_STATUS="❌ Not Running"
+    else
+        DP_STATUS="✅ Running"
+    fi
+
+    # Pending GPU pods on this node
+    PENDING=$(kubectl get pods --all-namespaces -o wide | grep Pending | grep $NODE | wc -l)
+    PENDING=${PENDING:-0}
+
+    printf "%-25s %-10s %-12s %-20s %-15s\n" "$NODE" "$GPU_CAP" "$GPU_ALLOC" "$DP_STATUS" "$PENDING"
+done
+
+echo ""
+echo "Legend:"
+echo "✅ Running - Device plugin is running on node"
+echo "❌ Not Running - Device plugin missing, GPU pods may fail"
+echo "PENDING_PODS >0 - Pods pending due to GPU unavailability or scheduling issues"
+echo "=============================="
